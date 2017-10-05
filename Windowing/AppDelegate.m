@@ -180,9 +180,9 @@
     _statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
     _statusItem.button.title = @"";
     _statusItem.button.toolTip = @"Desktop Window Tiler";
-    //NSImage* img = [NSImage imageNamed:@"statusBarIcon"];
-    //[img setTemplate:YES];
-    //_statusItem.button.image = img;
+    NSImage* img = [NSImage imageNamed:@"if_grid2_226575-3"];
+    [img setTemplate:YES];
+    _statusItem.button.image = img;
     
     NSMenu *menu = [[NSMenu alloc] init];
     [menu addItemWithTitle:@"Tile windows"
