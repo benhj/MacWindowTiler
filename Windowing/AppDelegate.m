@@ -34,10 +34,6 @@
         NSString * onScreen = [window objectForKey:@"kCGWindowIsOnscreen" ];
         int layerInt = [layer intValue];
         if(layerInt == 0 && [onScreen boolValue]) {
-            for (NSString * str in window.allKeys) {
-                NSString * val = [window objectForKey:str ];
-                NSLog(@"%@ is %@", str, val);
-            }
             [userWindows addObject:window];
         }
     }
@@ -112,28 +108,45 @@
 }
 
 - (void)tileWindows:(id)sender  {
-    
+
     NSArray* windows = [self retrieveUserVisibleWindows];
     NSRect screenDim = [self screenResolution];
     CGSize screenSize = screenDim.size;
     CGFloat screenWidth = screenSize.width;
     CGFloat screenHeight = screenSize.height;
 
-    NSUInteger count =  [windows count];//[self totalWindowCount:windows];
+    // Figure out number of rows and columns. Assuming, we allow
+    // N windows per row. When that is exhausted, we add
+    // another row
+    NSUInteger count =  [windows count];
     NSLog(@"number of: %lu", count);
+    NSUInteger maxPerRow = 2;
+    NSUInteger remainder = count % maxPerRow;
+    NSUInteger perfect = count - remainder;
+    NSUInteger additionBit = (remainder > 0) ? 1 : 0;
+    NSUInteger rows = count > maxPerRow ? (perfect / maxPerRow + additionBit) : 1;
+
+    NSLog(@"rows: %lu",rows);
+
     CGFloat widthToPlayWith = screenWidth;
     CGFloat heightToPlayWith = screenHeight;
-    CGFloat widthToSet = (widthToPlayWith - (5 * count)) / count;
-    
+    NSUInteger columns = count < maxPerRow ? count : maxPerRow;
+    NSLog(@"columns: %lu",columns);
+    CGFloat widthToSet = (widthToPlayWith - (5 * columns)) / columns;
+
     // Tiling vertically only happens when we run out of space horizontally
-    CGFloat heightToSet = heightToPlayWith;
+    CGFloat heightToSet = (rows > 1) ? (heightToPlayWith / rows) : heightToPlayWith;
     CGFloat xCounter = 0;
-    CGFloat yCounter = 0;
-    
+
+    // Set to 25 to take into account status bar
+    CGFloat yCounter = 5;
+
+    NSUInteger windowsPlaced = 0;
+
     // Retreive all open window associated PIDs
     NSArray* windowPIDs = [self retrieveWindowPIDs:windows];
     for (NSString * pidStr in windowPIDs) {
-        
+
         // Find all windows associated with PID
         CFArrayRef windowList = [self windowListForPID:pidStr];
         CFIndex windowCount = CFArrayGetCount(windowList);
@@ -144,7 +157,7 @@
         // Loop over windows -- set new size and positions
         for(CFIndex i = 0; i < windowCount; ++i) {
             AXUIElementRef windowRef = (AXUIElementRef) CFArrayGetValueAtIndex( windowList, i);
-            
+
             // Only proceed if the element for the window can actually be set. Take this
             // to mean that it's size can be updated.
             Boolean isPosSettable;
@@ -152,13 +165,26 @@
             AXUIElementIsAttributeSettable(windowRef, kAXPositionAttribute, &isPosSettable);
             AXUIElementIsAttributeSettable(windowRef, kAXSizeAttribute, &isSizeSettable);
             if(isPosSettable && isSizeSettable) {
-                NSLog(@"x pos: %f",xCounter);
+
+                // See if another row needed to be added
+                if(windowsPlaced > 0 && windowsPlaced % maxPerRow == 0) {
+                    xCounter = 0;
+                    yCounter += heightToSet + 5;
+                    widthToPlayWith = screenWidth;
+
+                    // Adjust for remaining windows
+                    if(count - windowsPlaced < maxPerRow) {
+                        columns = count - windowsPlaced;
+                    }
+
+                    widthToSet = (widthToPlayWith - (5 * columns)) / columns;
+                }
+
                 [self setWindowPosition:windowRef withX:xCounter andY:yCounter];
                 [self setWindowDim:windowRef withWidth:widthToSet andHeight:heightToSet];
-                
+
                 // Check here if widthToSet bigger than actual
                 CGFloat actualWidth = [self windowWidth:windowRef];
-                NSLog(@"%f %f", actualWidth, widthToSet);
                 if(actualWidth > widthToSet) {
                     xCounter += actualWidth + 5;
                     widthToPlayWith -= (actualWidth);
@@ -166,8 +192,7 @@
                     xCounter += widthToSet + 5;
                     widthToPlayWith -= (widthToSet);
                 }
-                --count;
-                widthToSet = (widthToPlayWith - (5 * count)) / count;
+                ++windowsPlaced;
             }
         }
 
