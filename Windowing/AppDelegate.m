@@ -8,7 +8,15 @@
 
 #import "AppDelegate.h"
 
-@interface AppDelegate ()
+@interface AppDelegate () {
+    id m_keyHandlerID;
+    id m_clickHandlerID;
+    NSWindow * m_messageWindow;
+    NSWindow * m_selectedWindowA;
+    NSWindow * m_selectedWindowB;
+    BOOL m_selectedA;
+    BOOL m_selectedB;
+}
 
 @end
 
@@ -36,6 +44,9 @@
         if(layerInt == 0 && [onScreen boolValue]) {
             [userWindows addObject:window];
         }
+        //NSString *bounds = [window objectForKey:@"kCGWindowBounds" ];
+        //NSLog(@"%@",bounds);
+        
     }
     return userWindows;
 }
@@ -43,11 +54,14 @@
 /// Retrieve a list of all PIDs associated with visible windows
 - (NSArray*)retrieveWindowPIDs:(NSArray*)windows {
     NSMutableArray* encounteredPIDs = [[NSMutableArray alloc] init];
+    /// Also filter on PID of 'this' app
+    int pid = [[NSProcessInfo processInfo] processIdentifier];
     for (NSDictionary *window in windows) {
         
         /// Skip over windows for which we've already processed
         NSString *pidStr = [window objectForKey:@"kCGWindowOwnerPID" ];
-        if ([encounteredPIDs containsObject: pidStr]) {
+        if ([encounteredPIDs containsObject: pidStr] ||
+            [encounteredPIDs containsObject:[NSString stringWithFormat:@"%d",pid]]) {
             continue;
         } else {
             [encounteredPIDs addObject:pidStr];
@@ -108,6 +122,22 @@
     return size.height;
 }
 
+- (CGFloat)windowX:(AXUIElementRef)windowRef {
+    CFTypeRef tref;
+    CGPoint position;
+    AXUIElementCopyAttributeValue(windowRef, kAXPositionAttribute, (CFTypeRef *)&tref);
+    AXValueGetValue(tref, kAXValueCGPointType, &position);
+    return position.x;
+}
+
+- (CGFloat)windowY:(AXUIElementRef)windowRef {
+    CFTypeRef tref;
+    CGPoint position;
+    AXUIElementCopyAttributeValue(windowRef, kAXPositionAttribute, (CFTypeRef *)&tref);
+    AXValueGetValue(tref, kAXValueCGPointType, &position);
+    return position.y;
+}
+
 - (NSUInteger)rowsAvailable:(NSUInteger)windowCount withMaxPerRow:(NSUInteger)maxPerRow {
     NSUInteger remainder = windowCount % maxPerRow;
     NSUInteger perfect = windowCount - remainder;
@@ -117,6 +147,9 @@
 
 - (void)tileWindows:(id)sender  {
 
+    // Disable any currently selected windows
+    [self disableAnySelectedWindows];
+    
     NSArray* windows = [self retrieveUserVisibleWindows];
     NSRect screenDim = [self screenResolution];
     CGSize screenSize = screenDim.size;
@@ -202,7 +235,69 @@
     [NSApp terminate: nil];
 }
 
-- (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
+- (void)fadeInMessageWindow {
+    
+    NSLog(@"windows is nil %d",(m_messageWindow == nil));
+    NSLog(@"windows is null %d",(m_messageWindow == NULL));
+    
+    if (m_messageWindow == nil) {
+        CGRect rect;
+        rect.size.width = 400;
+        rect.size.height = 100;
+        rect.origin.x = 0;
+        rect.origin.y = 0 ;
+
+        m_messageWindow  = [[NSWindow alloc] initWithContentRect:rect
+                                                      styleMask:NSWindowStyleMaskBorderless
+                                                        backing:NSBackingStoreBuffered
+                                                          defer:NO];
+        [m_messageWindow setOpaque:NO];
+        NSColor *semiTransparentGray = [NSColor colorWithDeviceRed:0.5
+                                                             green:0.5
+                                                              blue:0.5
+                                                             alpha:0.5];
+        [m_messageWindow setBackgroundColor:semiTransparentGray];
+        [m_messageWindow makeKeyAndOrderFront:NSApp];
+        NSRect cFrame =[[m_messageWindow contentView] frame];
+        NSTextView *theTextView = [[NSTextView alloc] initWithFrame:cFrame];
+        NSFont* font = [NSFont fontWithName:@"Helvetica" size:25.0];
+        [theTextView setBackgroundColor:semiTransparentGray];
+        [theTextView setFont:font];
+        [theTextView setString:@"Click on two windows, hit space when done!"];
+        m_messageWindow.releasedWhenClosed = YES;
+        [m_messageWindow center];
+        [theTextView alignCenter:NULL];
+        [m_messageWindow setContentView:theTextView];
+        [m_messageWindow makeFirstResponder:theTextView];
+    }
+    [m_messageWindow orderFrontRegardless];
+    [m_messageWindow setAlphaValue:0.0];
+    [[m_messageWindow animator] setAlphaValue:0.5];
+}
+
+- (void)fadeOutMessageWindow {
+    if(m_messageWindow) {
+        [[m_messageWindow animator] setAlphaValue:0.0];
+    }
+}
+
+/// To indicate that two windows should be swapped
+- (void)swapWindows:(id)sender {
+    // Display message in middle of screen indicating to user what to do
+    [self fadeInMessageWindow];
+    
+    // Setup an event handler to detect when windows are clicked on
+    m_clickHandlerID = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown handler:^(NSEvent * mouseEvent) {
+        [self clickHandler:mouseEvent];
+    }];
+    
+    // Setup handler to detect when the space bar is hit
+    m_keyHandlerID = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^(NSEvent * keyEvent) {
+        [self keyHandler:keyEvent];
+    }];
+}
+
+- (void)initializeMenu {
     
     // Set up the icon that is displayed in the status bar
     _statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
@@ -212,9 +307,13 @@
     [img setTemplate:YES];
     _statusItem.button.image = img;
     
+    // Add menu entries
     NSMenu *menu = [[NSMenu alloc] init];
     [menu addItemWithTitle:@"Tile windows"
                     action:@selector(tileWindows:)
+             keyEquivalent:@""];
+    [menu addItemWithTitle:@"Swap two windows"
+                    action:@selector(swapWindows:)
              keyEquivalent:@""];
     
     [menu addItem:[NSMenuItem separatorItem]]; // A thin grey line
@@ -224,7 +323,123 @@
                     action:@selector(processExit:)
              keyEquivalent:@""];
     
+    // Add the menu to the status item
     _statusItem.menu = menu;
+}
+
+- (void)clickHandler:(NSEvent*)mouseEvent {
+    NSLog(@"Mouse clicked: %@", NSStringFromPoint([mouseEvent locationInWindow]));
+    
+    // Retrive user visible windows to figure out which one was clicked on
+    NSArray * windows = [self retrieveUserVisibleWindows];
+    NSPoint clickPoint = [mouseEvent locationInWindow];
+    
+    // Loop over all open windows to see if click point is inside of one of them
+    NSArray * windowPIDs = [self retrieveWindowPIDs:windows];
+    NSRect selectedRect;
+    Boolean found = false;
+    for (NSString * pidStr in windowPIDs) {
+        // Find all windows associated with PID
+        CFArrayRef windowList = [self windowListForPID:pidStr];
+        CFIndex windowCount = CFArrayGetCount(windowList);
+        if ((!windowList) || windowCount < 1) {
+            continue;
+        }
+        for(CFIndex i = 0; i < windowCount; ++i) {
+            AXUIElementRef windowRef = (AXUIElementRef) CFArrayGetValueAtIndex( windowList, i);
+            CGPoint origin;
+            CGSize size;
+            origin.x = [self windowX:windowRef];
+            origin.y = [self windowY:windowRef];
+            size.width = [self windowWidth:windowRef];
+            size.height = [self windowHeight:windowRef];
+            
+            NSLog(@"origin.x: %f", origin.x);
+            NSLog(@"origin.y: %f", origin.y);
+            
+            if(clickPoint.x > origin.x && clickPoint.x <= origin.x + size.width &&
+               clickPoint.y > origin.y && clickPoint.y <= origin.y + size.height) {
+                NSLog(@"Found!!");
+                found = true;
+                selectedRect.origin = origin;
+                selectedRect.size = size;
+                break;
+            }
+        }
+        if(found) {
+            break;
+        }
+    }
+    
+    if(found) {
+        NSRect frame = NSRectFromCGRect(selectedRect);
+        NSLog(@"selectedRec.origin.x: %f", selectedRect.origin.x);
+        NSLog(@"selectedRec.origin.y: %f", selectedRect.origin.y);
+        
+        if (!m_selectedB || !m_selectedA) {
+            NSWindow * theWindow  = [[NSWindow alloc] initWithContentRect:frame
+                                                                styleMask:NSWindowStyleMaskBorderless
+                                                                  backing:NSBackingStoreBuffered
+                                                                    defer:NO];
+            [theWindow setOpaque:NO];
+            NSColor *semiTransparentBlue = [NSColor colorWithDeviceRed:0.0
+                                                                 green:0.0
+                                                                  blue:1.0
+                                                                 alpha:0.2];
+            [theWindow setBackgroundColor:semiTransparentBlue];
+            [theWindow makeKeyAndOrderFront:NSApp];
+            [theWindow display];
+            [theWindow orderFrontRegardless];
+            //[theWindow setReleasedWhenClosed:YES];
+
+            if (!m_selectedA) {
+                m_selectedWindowA = theWindow;
+                m_selectedWindowA.releasedWhenClosed = YES;
+                //[m_selectedWindowA setReleasedWhenClosed:YES];
+                // Close the message window
+                [self fadeOutMessageWindow];
+                m_selectedA = YES;
+            } else {
+                if(!m_selectedB) {
+                    m_selectedWindowB = theWindow;
+                    m_selectedWindowB.releasedWhenClosed = YES;
+                    //[m_selectedWindowB setReleasedWhenClosed:YES];
+                    m_selectedB = YES;
+                }
+            }
+        }
+    }
+}
+
+- (void)keyHandler:(NSEvent*)keyEvent {
+    short keyCode = [keyEvent keyCode];
+    if(keyCode == 49) {
+        // Disable window slection
+        [self disableAnySelectedWindows];
+        
+        // De-register global events handlers
+        [NSEvent removeMonitor:m_keyHandlerID];
+        [NSEvent removeMonitor:m_clickHandlerID];
+        
+    }
+}
+
+- (void)disableAnySelectedWindows {
+    if(m_selectedWindowB) {
+        [m_selectedWindowB setIsVisible:NO];
+        m_selectedB = NO;
+        
+    }
+    if(m_selectedWindowA) {
+        [m_selectedWindowA setIsVisible:NO];
+        m_selectedA = NO;
+    }
+}
+
+- (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
+    m_selectedA = NO;
+    m_selectedB = NO;
+    [self initializeMenu];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)aNotification {

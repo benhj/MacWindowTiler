@@ -12,6 +12,5 @@
     NSStatusItem *_statusItem;
 }
 
-
 @end
 
