@@ -40,6 +40,7 @@
     return userWindows;
 }
 
+/// Retrieve a list of all PIDs associated with visible windows
 - (NSArray*)retrieveWindowPIDs:(NSArray*)windows {
     NSMutableArray* encounteredPIDs = [[NSMutableArray alloc] init];
     for (NSDictionary *window in windows) {
@@ -107,6 +108,13 @@
     return size.height;
 }
 
+- (NSUInteger)rowsAvailable:(NSUInteger)windowCount withMaxPerRow:(NSUInteger)maxPerRow {
+    NSUInteger remainder = windowCount % maxPerRow;
+    NSUInteger perfect = windowCount - remainder;
+    NSUInteger additionBit = (remainder > 0) ? 1 : 0;
+    return windowCount > maxPerRow ? (perfect / maxPerRow + additionBit) : 1;
+}
+
 - (void)tileWindows:(id)sender  {
 
     NSArray* windows = [self retrieveUserVisibleWindows];
@@ -118,28 +126,20 @@
     // Figure out number of rows and columns. Assuming, we allow
     // N windows per row. When that is exhausted, we add
     // another row
-    NSUInteger count =  [windows count];
-    NSLog(@"number of: %lu", count);
+    NSUInteger count = [windows count];
     NSUInteger maxPerRow = 2;
-    NSUInteger remainder = count % maxPerRow;
-    NSUInteger perfect = count - remainder;
-    NSUInteger additionBit = (remainder > 0) ? 1 : 0;
-    NSUInteger rows = count > maxPerRow ? (perfect / maxPerRow + additionBit) : 1;
-
-    NSLog(@"rows: %lu",rows);
+    NSUInteger rows = [self rowsAvailable:count withMaxPerRow:maxPerRow];
 
     CGFloat widthToPlayWith = screenWidth;
     CGFloat heightToPlayWith = screenHeight;
     NSUInteger columns = count < maxPerRow ? count : maxPerRow;
-    NSLog(@"columns: %lu",columns);
+    //NSLog(@"columns: %lu",columns);
     CGFloat widthToSet = (widthToPlayWith - (5 * columns)) / columns;
 
     // Tiling vertically only happens when we run out of space horizontally
-    CGFloat heightToSet = (rows > 1) ? (heightToPlayWith / rows) : heightToPlayWith;
+    CGFloat heightToSet = (rows > 1) ? (heightToPlayWith - (5 * rows)) / rows : heightToPlayWith;
     CGFloat xCounter = 0;
-
-    // Set to 25 to take into account status bar
-    CGFloat yCounter = 5;
+    CGFloat yCounter = 25;
 
     NSUInteger windowsPlaced = 0;
 
@@ -195,8 +195,11 @@
                 ++windowsPlaced;
             }
         }
-
     }
+}
+
+- (void)processExit:(id)sender {
+    [NSApp terminate: nil];
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
@@ -214,12 +217,18 @@
                     action:@selector(tileWindows:)
              keyEquivalent:@""];
     
+    [menu addItem:[NSMenuItem separatorItem]]; // A thin grey line
+    
+    // Add an exit item to exit program
+    [menu addItemWithTitle:@"Exit"
+                    action:@selector(processExit:)
+             keyEquivalent:@""];
+    
     _statusItem.menu = menu;
 }
 
 - (void)applicationWillTerminate:(NSNotification *)aNotification {
     // Insert code here to tear down your application
 }
-
 
 @end
