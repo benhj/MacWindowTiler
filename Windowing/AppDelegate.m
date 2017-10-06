@@ -182,14 +182,13 @@
 
         // Find all windows associated with PID
         CFArrayRef windowList = [self windowListForPID:pidStr];
-        if ((!windowList)) {
+        if (!windowList) {
             continue;
         }
         CFIndex windowCount = CFArrayGetCount(windowList);
         if(windowCount < 1) {
             continue;
         }
-        
 
         // Loop over windows -- set new size and positions
         for(CFIndex i = 0; i < windowCount; ++i) {
@@ -345,8 +344,11 @@
     for (NSString * pidStr in windowPIDs) {
         // Find all windows associated with PID
         CFArrayRef windowList = [self windowListForPID:pidStr];
+        if (!windowList) {
+            continue;
+        }
         CFIndex windowCount = CFArrayGetCount(windowList);
-        if ((!windowList) || windowCount < 1) {
+        if(windowCount < 1) {
             continue;
         }
         for(CFIndex i = 0; i < windowCount; ++i) {
