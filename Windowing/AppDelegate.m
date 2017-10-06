@@ -212,7 +212,6 @@
                     if(count - windowsPlaced < maxPerRow) {
                         columns = count - windowsPlaced;
                     }
-
                     widthToSet = (widthToPlayWith - (5 * columns)) / columns;
                 }
 
@@ -228,7 +227,10 @@
                     xCounter += widthToSet + 5;
                     widthToPlayWith -= (widthToSet);
                 }
+                //widthToSet = (widthToPlayWith - (5 * columns)) / columns;
                 ++windowsPlaced;
+            } else {
+                --count;
             }
         }
     }
