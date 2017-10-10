@@ -9,11 +9,11 @@
 #import "AppDelegate.h"
 
 @interface AppDelegate () {
-    id m_keyHandlerID;
     id m_clickHandlerID;
+    int m_maxPerRow;
     NSWindow * m_messageWindow;
     NSWindow * m_selectedWindowA;
-    NSWindow * m_selectedWindowB;
+    AXUIElementRef m_selectedWindowRef;
     BOOL m_selectedA;
     BOOL m_selectedB;
 }
@@ -160,7 +160,7 @@
     // N windows per row. When that is exhausted, we add
     // another row
     NSUInteger count = [windows count];
-    NSUInteger maxPerRow = 2;
+    NSUInteger maxPerRow = m_maxPerRow;
     NSUInteger rows = [self rowsAvailable:count withMaxPerRow:maxPerRow];
 
     CGFloat widthToPlayWith = screenWidth;
@@ -289,17 +289,23 @@
 /// To indicate that two windows should be swapped
 - (void)swapWindows:(id)sender {
     // Display message in middle of screen indicating to user what to do
-    [self fadeInMessageWindow];
+    // [self fadeInMessageWindow];
     
     // Setup an event handler to detect when windows are clicked on
     m_clickHandlerID = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown handler:^(NSEvent * mouseEvent) {
         [self clickHandler:mouseEvent];
     }];
-    
-    // Setup handler to detect when the space bar is hit
-    m_keyHandlerID = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^(NSEvent * keyEvent) {
-        [self keyHandler:keyEvent];
-    }];
+}
+
+- (void)increaseMaxPerRow:(id)sender {
+    ++m_maxPerRow;
+    [self tileWindows:sender];
+}
+- (void)decreaseMaxPerRow:(id)sender {
+    if(m_maxPerRow > 2) {
+        --m_maxPerRow;
+        [self tileWindows:sender];
+    }
 }
 
 - (void)initializeMenu {
@@ -317,6 +323,15 @@
     [menu addItemWithTitle:@"Tile windows"
                     action:@selector(tileWindows:)
              keyEquivalent:@""];
+    
+    // Increase number of windows per row
+    [menu addItemWithTitle:@"Increase windows per row"
+                    action:@selector(increaseMaxPerRow:)
+             keyEquivalent:@""];
+    [menu addItemWithTitle:@"Decrease windows per row"
+                    action:@selector(decreaseMaxPerRow:)
+             keyEquivalent:@""];
+    
     [menu addItemWithTitle:@"Swap two windows"
                     action:@selector(swapWindows:)
              keyEquivalent:@""];
@@ -355,6 +370,7 @@
         }
         for(CFIndex i = 0; i < windowCount; ++i) {
             AXUIElementRef windowRef = (AXUIElementRef) CFArrayGetValueAtIndex( windowList, i);
+            
             CGPoint origin;
             CGSize size;
             origin.x = [self windowX:windowRef];
@@ -367,10 +383,22 @@
             
             if(clickPoint.x > origin.x && clickPoint.x <= origin.x + size.width &&
                clickPoint.y > origin.y && clickPoint.y <= origin.y + size.height) {
-                NSLog(@"Found!!");
+                if(!m_selectedA) {
+                    m_selectedWindowRef = windowRef;
+                    selectedRect.origin = origin;
+                    selectedRect.size = size;
+                } else { // perform swap
+                    // Make position of windowRef position of m_selectedWindowRef
+                    // and vice-versa
+                    CGFloat selectedX = [self windowX:m_selectedWindowRef];
+                    CGFloat selectedY = [self windowY:m_selectedWindowRef];
+                    [self setWindowPosition:windowRef withX:selectedX andY:selectedY];
+                    [self setWindowPosition:m_selectedWindowRef withX:origin.x andY:origin.y];
+                    [self disableAnySelectedWindows];
+                    [NSEvent removeMonitor:m_clickHandlerID];
+                    return;
+                }
                 found = true;
-                selectedRect.origin = origin;
-                selectedRect.size = size;
                 break;
             }
         }
@@ -378,66 +406,36 @@
             break;
         }
     }
-    
-    if(found) {
+
+    if(found && !m_selectedA) {
         NSRect frame = NSRectFromCGRect(selectedRect);
         NSLog(@"selectedRec.origin.x: %f", selectedRect.origin.x);
         NSLog(@"selectedRec.origin.y: %f", selectedRect.origin.y);
-        
-        if (!m_selectedB || !m_selectedA) {
-            NSWindow * theWindow  = [[NSWindow alloc] initWithContentRect:frame
-                                                                styleMask:NSWindowStyleMaskBorderless
-                                                                  backing:NSBackingStoreBuffered
-                                                                    defer:NO];
-            [theWindow setOpaque:NO];
-            NSColor *semiTransparentBlue = [NSColor colorWithDeviceRed:0.0
-                                                                 green:0.0
-                                                                  blue:1.0
-                                                                 alpha:0.2];
-            [theWindow setBackgroundColor:semiTransparentBlue];
-            [theWindow makeKeyAndOrderFront:NSApp];
-            [theWindow display];
-            [theWindow orderFrontRegardless];
-            //[theWindow setReleasedWhenClosed:YES];
 
-            if (!m_selectedA) {
-                m_selectedWindowA = theWindow;
-                m_selectedWindowA.releasedWhenClosed = YES;
-                //[m_selectedWindowA setReleasedWhenClosed:YES];
-                // Close the message window
-                [self fadeOutMessageWindow];
-                m_selectedA = YES;
-            } else {
-                if(!m_selectedB) {
-                    m_selectedWindowB = theWindow;
-                    m_selectedWindowB.releasedWhenClosed = YES;
-                    //[m_selectedWindowB setReleasedWhenClosed:YES];
-                    m_selectedB = YES;
-                }
-            }
-        }
-    }
-}
+        NSWindow * theWindow  = [[NSWindow alloc] initWithContentRect:frame
+                                                            styleMask:NSWindowStyleMaskBorderless
+                                                              backing:NSBackingStoreBuffered
+                                                                defer:NO];
+        [theWindow setOpaque:NO];
+        NSColor *semiTransparentBlue = [NSColor colorWithDeviceRed:0.0
+                                                             green:0.0
+                                                              blue:1.0
+                                                             alpha:0.2];
+        [theWindow setBackgroundColor:semiTransparentBlue];
+        [theWindow makeKeyAndOrderFront:NSApp];
+        [theWindow display];
+        [theWindow orderFrontRegardless];
 
-- (void)keyHandler:(NSEvent*)keyEvent {
-    short keyCode = [keyEvent keyCode];
-    if(keyCode == 49) {
-        // Disable window slection
-        [self disableAnySelectedWindows];
-        
-        // De-register global events handlers
-        [NSEvent removeMonitor:m_keyHandlerID];
-        [NSEvent removeMonitor:m_clickHandlerID];
-        
+        m_selectedWindowA = theWindow;
+        m_selectedWindowA.releasedWhenClosed = YES;
+        //[m_selectedWindowA setReleasedWhenClosed:YES];
+        // Close the message window
+        // [self fadeOutMessageWindow];
+        m_selectedA = YES;
     }
 }
 
 - (void)disableAnySelectedWindows {
-    if(m_selectedWindowB) {
-        [m_selectedWindowB setIsVisible:NO];
-        m_selectedB = NO;
-        
-    }
     if(m_selectedWindowA) {
         [m_selectedWindowA setIsVisible:NO];
         m_selectedA = NO;
@@ -446,7 +444,7 @@
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
     m_selectedA = NO;
-    m_selectedB = NO;
+    m_maxPerRow = 2;
     [self initializeMenu];
 }
 
